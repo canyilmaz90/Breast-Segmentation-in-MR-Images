@@ -1,3 +1,4 @@
+#%% Initialization
 from __future__ import print_function
 
 import os
@@ -5,9 +6,9 @@ import cv2
 
 import numpy as np
 import keras
-from keras.models import Model, Sequential
-from keras.layers import Input, concatenate, Dropout, merge
-from keras.layers import Conv2D, MaxPooling2D, Conv2DTranspose, UpSampling2D
+from keras.models import Model
+from keras.layers import Input, Dropout, merge
+from keras.layers import Conv2D, MaxPooling2D, UpSampling2D
 from keras.optimizers import Adam
 from keras.callbacks import ModelCheckpoint
 from keras import backend as K
@@ -15,7 +16,7 @@ from skimage.measure import label
 
 from data import load_train_data, load_test_data
 from data import image_cols, image_rows
-from prepare import preprocess
+from prepare import preprocess, getLargestCC
 from prepare import img_rows, img_cols
 
 #K.set_image_data_format('channels_last')  # TF dimension ordering in this code
@@ -25,103 +26,80 @@ save_path = 'save/'
 
 def unet():
     inputs = Input((1, img_rows, img_cols))
-    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same')(inputs)
-    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv1)
+    conv1 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(inputs)
+    conv1 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
-
-    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same')(pool1)
-    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv2)
-    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
-
-    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool2)
-    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv3)
-    pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
-
-    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same')(pool3)
-    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv4)
-    pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
-
-    conv5 = Conv2D(1024, (3, 3), activation='relu', padding='same')(pool4)
-    conv5 = Conv2D(1024, (3, 3), activation='relu', padding='same')(conv5)
-
-    up6 = merge([Conv2D(512, 2, 2, border_mode='same')(UpSampling2D(size=(2, 2))(conv5)), conv4], mode='concat', concat_axis=1)
-#    concatenate([Conv2DTranspose(512, (2, 2), strides=(2, 2), padding='same')(conv5), conv4], axis=3)
-    conv6 = Conv2D(512, (3, 3), activation='relu', padding='same')(up6)
-    conv6 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv6)
-
-    up7 = merge([Conv2D(512, 2, 2, border_mode='same')(UpSampling2D(size=(2, 2))(conv6)), conv3], mode='concat', concat_axis=1)
-#    concatenate([Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='same')(conv6), conv3], axis=3)
-    conv7 = Conv2D(256, (3, 3), activation='relu', padding='same')(up7)
-    conv7 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv7)
-
-    up8 = merge([Conv2D(512, 2, 2, border_mode='same')(UpSampling2D(size=(2, 2))(conv7)), conv2], mode='concat', concat_axis=1)
-#    concatenate([Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(conv7), conv2], axis=3)
-    conv8 = Conv2D(128, (3, 3), activation='relu', padding='same')(up8)
-    conv8 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv8)
-
-    up9 = merge([Conv2D(512, 2, 2, border_mode='same')(UpSampling2D(size=(2, 2))(conv8)), conv1], mode='concat', concat_axis=1)
-#    concatenate([Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='same')(conv8), conv1], axis=3)
-    conv9 = Conv2D(64, (3, 3), activation='relu', padding='same')(up9)
-    conv9 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv9)
-
-    conv10 = Conv2D(3, (1, 1), activation='softmax')(conv9)
+    
+    conv2 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool1)
+    conv2 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv2)
+    drop2 = Dropout(0.25)(conv2)
+    pool2 = MaxPooling2D(pool_size=(2, 2))(drop2)
+    
+    conv3 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool2)
+    conv3 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv3)
+    drop3 = Dropout(0.25)(conv3)
+    pool3 = MaxPooling2D(pool_size=(2, 2))(drop3)
+    
+    conv4 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool3)
+    conv4 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv4)
+    drop4 = Dropout(0.5)(conv4)
+    pool4 = MaxPooling2D(pool_size=(2, 2))(drop4)
+    
+    conv5 = Conv2D(1024, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(pool4)
+    conv5 = Conv2D(1024, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv5)
+    drop5 = Dropout(0.5)(conv5)
+    
+    up6 = Conv2D(512, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(UpSampling2D(size = (2,2))(drop5))
+    merge6 = merge([drop4,up6], mode = 'concat', concat_axis = 1)
+    conv6 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge6)
+    conv6 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv6)
+    
+    up7 = Conv2D(256, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(UpSampling2D(size = (2,2))(conv6))
+    merge7 = merge([drop3,up7], mode = 'concat', concat_axis = 1)
+    conv7 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge7)
+    conv7 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv7)
+    
+    up8 = Conv2D(128, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(UpSampling2D(size = (2,2))(conv7))
+    merge8 = merge([drop2,up8], mode = 'concat', concat_axis = 1)
+    conv8 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge8)
+    conv8 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv8)
+    
+    up9 = Conv2D(64, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(UpSampling2D(size = (2,2))(conv8))
+    merge9 = merge([conv1,up9], mode = 'concat', concat_axis = 1)
+    conv9 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(merge9)
+    conv9 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
+    conv9 = Conv2D(3, (1, 1), activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
+    
+    conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
 
     model = Model(input=[inputs], output=[conv10])
 
 #    model.compile(optimizer=Adam(lr=1e-5), loss=dice_coef_loss, metrics=[dice_coef])
-    model.compile(optimizer=Adam(lr=1e-2), loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer=Adam(lr=2.5e-5), loss='binary_crossentropy', metrics=['accuracy'])
 
     return model
 
 
-def train(imgs_train,imgs_mask_train):
-#    mean = np.mean(imgs_train)  # mean for data centering
-#    std = np.std(imgs_train)  # std for data normalization
-#
-#    imgs_train -= mean
-#    imgs_train /= std
-
+def train_predict(x_train, y_train, x_test):
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
     model = unet()
-    model_checkpoint = ModelCheckpoint(save_path + 'weights.hdf5', monitor='val_loss', save_best_only=True)
+    model_checkpoint = ModelCheckpoint('weights.hdf5', monitor='val_loss', save_best_only=True)
 
     print('-'*30)
     print('Fitting model...')
     print('-'*30)
-    model.fit(imgs_train, imgs_mask_train, batch_size=6, epochs=20, verbose=1, shuffle=True,
+    model.fit(x_train, y_train, batch_size=6, epochs=30, verbose=1, shuffle=True,
               validation_split=0.28,
               callbacks=[model_checkpoint])
-
-
-def predict():
-    print('-'*30)
-    print('Loading and preprocessing test data...')
-    print('-'*30)
-    imgs_test, imgs_id_test = load_test_data()
-    imgs_test = preprocess(imgs_test)
-
-    imgs_test = imgs_test.astype('float32')
-    imgs_test /= 255.
-#    imgs_test -= mean
-#    imgs_test /= std
-
-    print('-'*30)
-    print('Loading saved weights...')
-    print('-'*30)
-    model = unet()
-    model.load_weights(save_path + 'weights.hdf5')
 
     print('-'*30)
     print('Predicting masks on test data...')
     print('-'*30)
-    imgs_mask_test = model.predict(imgs_test, verbose=1)
-    np.save(save_path + 'imgs_mask_test.npy', imgs_mask_test)
-
-    print('-' * 30)
-    print('Saving predicted masks to files...')
-    print('-' * 30)
+    y_test = model.predict(x_test, verbose=1)
+    np.save(save_path + 'imgs_mask_test.npy', y_test)
+    return y_test
     
 #    for image, image_id in zip(imgs_mask_test, imgs_id_test):
 #        image = (image[:, :, 0] * 255.).astype(np.uint8)
@@ -150,24 +128,9 @@ def retrieve_imgs():
     print('segmented images are retrieved')
     print('-' * 50)
 
-def getLargestCC(imarray):
-    imarray2 = np.zeros(imarray.shape)
-    for im in range(42):
-        image = imarray[im]
-        image = image.astype('uint8')
-        nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(image, connectivity=8)
-        sizes = stats[:, -1]
-        max_label = 1
-        max_size = sizes[1]
-        for i in range(2, nb_components):
-            if sizes[i] > max_size:
-                max_label = i
-                max_size = sizes[i]
-        img2 = np.zeros(output.shape)
-        img2[output == max_label] = 1
-        imarray2[im] = img2
-    return imarray2
 
+
+#%% Data Preparation
 if __name__ == '__main__':
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -182,6 +145,7 @@ if __name__ == '__main__':
     print('Resizing train data ...')
     print('-'*30)
     imgs_train = preprocess(imgs_train)
+#    imgs_trainn = imgs_train.reshape((42, 96, 96))
     imgs_mask_train = preprocess(imgs_mask_train)
     
     imgs_mask_train[imgs_mask_train <= 0.2] = 0;
@@ -189,34 +153,47 @@ if __name__ == '__main__':
     imgs_mask_train[imgs_mask_train > 0.6] = 1;
     
     print('-'*30)
+    print('Loading and preprocessing test data...')
+    print('-'*30)
+    imgs_test, imgs_id_test = load_test_data()
+    imgs_test = imgs_test.astype('float32')
+    imgs_test /= 255.
+    imgs_test = preprocess(imgs_test)
+    imgs_testt = imgs_test.reshape((17, 96, 96))
+#%% Reshape masks into categorical structure
+    print('-'*30)
     print('Creating categorical mask data ...')
     print('-'*30)
-    trainmask = np.zeros((42,1,96,96))
+    trainmask = np.zeros((42, 1, 96, 96)).astype('float32')
     trainmask[imgs_mask_train == 1] = 1
     trainmask[imgs_mask_train == 0.5] = 2
     imgs_mask_train = keras.utils.to_categorical(trainmask, num_classes=3)
     
-    asd1 = imgs_mask_train[0:387072, 0]
-    asd1 = asd1.reshape((42,96,96))
-    asd2 = imgs_mask_train[0:387072, 1]
-    asd2 = asd2.reshape((42,96,96))
-    asd3 = imgs_mask_train[0:387072, 2]
-    asd3 = asd3.reshape((42,96,96))
-    asd3 = getLargestCC(asd3)
+    onlybackground = imgs_mask_train[:, :, :, :, 0].reshape((42, 96, 96)).astype('float32')
+    onlybreast = imgs_mask_train[:, :, :, :, 1].reshape((42, 96, 96)).astype('float32')
+    onlychest = imgs_mask_train[:, :, :, :, 2].reshape((42, 96, 96)).astype('float32')
+    onlychest = getLargestCC(onlychest)
     
-    imgs_mask_train = np.zeros((42,3,96,96))
-    imgs_mask_train[:,0,:,:] = asd1
-    imgs_mask_train[:,1,:,:] = asd2
-    imgs_mask_train[:,2,:,:] = asd3
+    imgs_mask_train = np.zeros((42,3,96,96)).astype('float32')
+    imgs_mask_train[:,0,:,:] = onlybackground
+    imgs_mask_train[:,1,:,:] = onlybreast
+    imgs_mask_train[:,2,:,:] = onlychest
+#%% Normalization    
+    mean = np.mean(imgs_train)  # mean for data centering
+    std = np.std(imgs_train)  # std for data normalization
+
+    imgs_train -= mean
+    imgs_train /= std
     
-    train(imgs_train,imgs_mask_train)
-    predict()
-#    
-    imgs_mask_test = np.load(save_path + 'imgs_mask_test.npy')
-    testmask1 = imgs_mask_test[:,0,:,:]
-    testmask1 = testmask1.reshape((42, 96, 96))
-    testmask2 = imgs_mask_test[:,1,:,:]
-    testmask2 = testmask1.reshape((42, 96, 96))
-    testmask3 = imgs_mask_test[:,2,:,:]
-    testmask3 = testmask1.reshape((42, 96, 96))
-    
+    imgs_test -= mean
+    imgs_test /= std
+
+#%% Train and Predict    
+    imgs_mask_test = train_predict(imgs_train, onlybreast.reshape((42, 1, 96, 96)), imgs_test)
+#    model = unet()
+#    model.load_weights('weights.hdf5')
+#    imgs_mask_test = model.predict(imgs_test, verbose=1)    
+#    imgs_mask_test = np.load(save_path + 'imgs_mask_test.npy')
+    testmask = imgs_mask_test.reshape((17, 96, 96))
+#    testmask[testmask1 < 0.5] = 0
+#    testmask[testmask1 >= 0.5] = 1

@@ -1,53 +1,80 @@
+from __future__ import print_function
+
 import os
 import os.path
 import numpy as np
 import cv2
 from scipy.ndimage.interpolation import zoom
 from skimage.transform import resize
-from data import image_cols, image_rows
-data_path = 'C:/Users/canyi/Desktop/CHEN CUI YING/'
 
+
+data_path = 'mri/'
 img_rows = 96
 img_cols = 96
 
 
-def prep_dicomdata():
-    images = os.listdir(data_path)
+def prep_dicomdata(patient):
+    print('*'*50)
+    print('*'*50)
+    print('Patient: ' + patient)
+    print('-'*50)
+    patientdir = os.path.join(data_path, patient + '/')
+    outdir = os.path.join(patientdir, 'resampled/')
+    images = os.listdir(patientdir + '/original/')
     total = len(images) // 5
+    
+    img_sample = cv2.imread(os.path.join(patientdir + '/original/', images[0]), cv2.IMREAD_GRAYSCALE)
+    img_sample = np.array([img_sample])
+    rows = img_sample.shape[1]
+    cols = img_sample.shape[2]
 
-    imgs_1 = np.ndarray((total, image_rows, image_cols), dtype=np.uint8)
-    imgs_2 = np.ndarray((total, image_rows, image_cols), dtype=np.uint8)
-    imgs_3 = np.ndarray((total, image_rows, image_cols), dtype=np.uint8)
-    imgs_4 = np.ndarray((total, image_rows, image_cols), dtype=np.uint8)
-    imgs_5 = np.ndarray((total, image_rows, image_cols), dtype=np.uint8)
+    imgs = np.ndarray((total, rows, cols), dtype=np.uint8)
     
     print('-'*50)
     print('loading images...')
     print('-'*50)
     for i in range(total):
-        img_1 = cv2.imread(os.path.join(data_path, images[i*5]), cv2.IMREAD_GRAYSCALE)
-        img_1 = np.array([img_1])
-        imgs_1[i] = img_1
-        img_2 = cv2.imread(os.path.join(data_path, images[i*5 + 1]), cv2.IMREAD_GRAYSCALE)
-        img_2 = np.array([img_2])
-        imgs_2[i] = img_2
-        img_3 = cv2.imread(os.path.join(data_path, images[i*5 + 2]), cv2.IMREAD_GRAYSCALE)
-        img_3 = np.array([img_3])
-        imgs_3[i] = img_3
-        img_4 = cv2.imread(os.path.join(data_path, images[i*5 + 3]), cv2.IMREAD_GRAYSCALE)
-        img_4 = np.array([img_4])
-        imgs_4[i] = img_4
-        img_5 = cv2.imread(os.path.join(data_path, images[i*5 + 4]), cv2.IMREAD_GRAYSCALE)
-        img_5 = np.array([img_5])
-        imgs_5[i] = img_5
-        
-    np.save(os.path.join(data_path, 'resampled/') + 'imgs_1.npy', imgs_1)
-    np.save(os.path.join(data_path, 'resampled/') + 'imgs_2.npy', imgs_2)
-    np.save(os.path.join(data_path, 'resampled/') + 'imgs_3.npy', imgs_3)
-    np.save(os.path.join(data_path, 'resampled/') + 'imgs_4.npy', imgs_4)
-    np.save(os.path.join(data_path, 'resampled/') + 'imgs_5.npy', imgs_5)
-    print('loading done.')
+        img = cv2.imread(os.path.join(patientdir + '/original/', images[i*5 + 4]), cv2.IMREAD_GRAYSCALE)
+        img = np.array([img])
+        imgs[i] = img
 
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)    
+    np.save(outdir + 'imgs.npy', imgs)
+    print('loading done.')
+    
+    if rows == 400:
+        spacing = np.array([2.0, 0.8, 0.8])
+    elif rows == 432:
+        spacing = np.array([2.0, 0.78703701496124, 0.78703701496124])
+    elif rows == 512:
+        spacing = np.array([2.0, 0.78125, 0.78125])
+    else:
+        raise ValueError("This shape is unknown. Modify code again!")
+    
+    new_spacing =  np.array([1.0, 1.0, 1.0])
+    newimg = resample(imgs, spacing, new_spacing, 2)
+    print('-'*50)
+    print('resampling done.')
+    print('-'*50)
+    
+    if newimg.shape[1] < 336:
+        wr = (336 - newimg.shape[1]) // 2
+        wc = (336 - newimg.shape[2]) // 2
+        padwidth = ((0, 0), (wr, wr), (wc, wc))
+        newimg = np.pad(newimg, padwidth, mode='constant', constant_values=0)
+    elif newimg.shape[1] > 336:
+        wr = (newimg.shape[1] - 336) // 2
+        wc = (newimg.shape[2] - 336) // 2
+        newimgtemp = np.ndarray((newimg.shape[0], 336, 336), dtype=np.uint8)
+        for i in range(newimg.shape[0]):
+            temp = newimg[i].reshape(newimg.shape[1], newimg.shape[2])
+            newimgtemp[i] = temp[wr : wr + 336, wc : wc + 336]
+        newimg = newimgtemp
+    
+    for i in range(newimg.shape[0]):
+        cv2.imwrite(outdir + str(i+1) + '.png', newimg[i])
+    print('new images are created.')
 
 
 def resample(imgs, spacing, new_spacing, order=2):
@@ -56,7 +83,7 @@ def resample(imgs, spacing, new_spacing, order=2):
         true_spacing = spacing * imgs.shape / new_shape
         resize_factor = new_shape / imgs.shape
         imgs = zoom(imgs, resize_factor, mode = 'nearest',order=order)
-        return imgs, true_spacing
+        return imgs
     elif len(imgs.shape)==4:
         n = imgs.shape[-1]
         newimg = []
@@ -65,7 +92,7 @@ def resample(imgs, spacing, new_spacing, order=2):
             newslice,true_spacing = resample(slice,spacing,new_spacing)
             newimg.append(newslice)
         newimg=np.transpose(np.array(newimg),[1,2,3,0])
-        return newimg,true_spacing
+        return newimg
     else:
         raise ValueError('wrong shape')
         
@@ -79,12 +106,27 @@ def preprocess(imgs):
     return imgs_p
 
 
+def getLargestCC(imarray):
+    imarray2 = np.zeros(imarray.shape)
+    for im in range(42):
+        image = imarray[im]
+        image = image.astype('uint8')
+        nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(image, connectivity=8)
+        sizes = stats[:, -1]
+        max_label = 1
+        max_size = sizes[1]
+        for i in range(2, nb_components):
+            if sizes[i] > max_size:
+                max_label = i
+                max_size = sizes[i]
+        img2 = np.zeros(output.shape)
+        img2[output == max_label] = 1
+        imarray2[im] = img2
+    return imarray2
+
+
 if __name__ == '__main__':
-#    --------Preparing Dicom Data-----------
-    prep_dicomdata()
-    imgs_1 = np.load(os.path.join(data_path, 'resampled/') + 'imgs_1.npy')
-    cv2.imwrite(os.path.join(data_path, 'resampled/') + 'img_1.png', imgs_1[74])
-    spacing = np.array([2.0, 0.8, 0.8])
-    new_spacing =  np.array([1.0, 1.0, 1.0])
-    imgsnew_1, truspc = resample(imgs_1, spacing, new_spacing, 2) 
-#    --------------------------------------
+#%% --------Preparing Dicom Data-----------
+    patients = os.listdir(data_path)
+    for patient in patients:
+        prep_dicomdata(patient)
